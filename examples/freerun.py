@@ -30,7 +30,6 @@ def main():
         initial_state=Ping,
         final_state=mortise.DefaultStates.End,
         default_error_state=ErrorState,
-        msg_queue=queue.Queue(),
         log_fn=print)
 
     # Runs forever

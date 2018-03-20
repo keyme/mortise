@@ -6,6 +6,7 @@ from pprint import pprint
 from threading import Timer
 import collections
 from datetime import datetime
+from queue import Queue
 
 
 class StateRetryLimitError(Exception):
@@ -73,14 +74,24 @@ class State:
     should return one of several options:
 
     * None/True - A wait state, The state is waiting on some external
-    stimulus (like a message). Returning 'True' indicates that the
-    state swallowed the message that we were passed. Returning 'None'
-    indicates that it did nothing with the message (which will cause
-    the message to be trapped by the encapsulating FSM)
+    stimulus (like a message).
+
+        * Returning 'True' indicates that the state swallowed the message that
+        we were passed. On the next tick, the same state will begin from its
+        on_enter method. This is a transition from the current state back to a
+        new instance of the same state.
+
+        * Returning 'None' indicates that the state did nothing with the
+        message (which will cause the message to be trapped by the
+        encapsulating FSM). On the next tick, the on_enter method is bypassed,
+        and the state will begin from its on_state method. This is a wait in
+        the current instance of the state, for the right message needed to
+        transition.
 
     * Its own class descriptor (not an instance!) - This is a retry.
     The state will transition to an uninitialized state and will
-    restart execution from on_enter.
+    restart execution from on_enter. Note that this is a tool for handling
+    "bad input", and the FSM will not tick, and no new message will be acquired.
 
     * Another state's class descriptor (not an instance!) - This is a
     transition. The FSM will fire the current on_leave handler (if
@@ -119,8 +130,8 @@ class State:
             self._tries = self.RETRIES + 1
         else:
             self._tries = None
-        self.has_entered = False
         self._cancel_failsafe()
+        self.has_entered = False
 
     def on_enter(self, shared):
         pass
@@ -183,6 +194,8 @@ class State:
         # and reset our timer
         if result is not None and state_name(result) == self.name:
             self.has_entered = False
+            # Make sure that our timer is cancelled (in case out of order)
+            self._cancel_failsafe()
             if isinstance(shared_state.msg, Exception):
                 shared_state.msg = None
 
@@ -192,9 +205,11 @@ class State:
         result = None
 
         if isinstance(shared_state.msg, StateTimedOut):
+            print("Handling timeout in q: {}".format(shared_state.msg))
             result = self._handle_timeout(shared_state)
             return result
         elif isinstance(shared_state.msg, StateRetryLimitError):
+            print("Handling retry limit error in q: {}".format(shared_state.msg))
             result = self.on_fail(shared_state)
             if not result:
                 result = shared_state.fsm._err_st
@@ -277,10 +292,12 @@ class StateMachine:
     """The StateMachine object is responsible for managing state
     transitions and bookkeeping shared state. On instantiation, the
     user must supply initial, final, and default error states (which
-    must be subclasses of State). Additionally, the user MUST supply a
-    Queue object (msg_queue) which will be used to pass messages into
-    states (and relay information about timeouts and retry failures
-    between the states and FSM).
+    must be subclasses of State).
+
+    Additionally, the user MAY supply a Queue object (msg_queue) which will be
+    used to pass messages into states (and relay information about timeouts and
+    retry failures between the states and FSM). If no msg_queue is provided
+    a default queue.Queue().empty() is used.
 
     The user MAY supply filter and trap functions. filter allows the
     user to pre-screen messages that may be important to the state
@@ -291,13 +308,14 @@ class StateMachine:
     (For a visual overview of the data flow, see mortise_data_flow.png)
 
     Finally, the user MAY supply a common_state class instance. This
-    will be passed into each state and can be used to propegate
+    will be passed into each state and can be used to propagate
     information between states. If no common_state class is provided,
     an empty 'GenericCommon' will be provided (which is simply an empty class)
 
     """
     def __init__(self, initial_state, final_state,
-                 default_error_state, msg_queue,
+                 default_error_state,
+                 msg_queue=None,
                  filter_fn=None, trap_fn=None,
                  on_error_fn=None,
                  log_fn=None,
@@ -316,7 +334,7 @@ class StateMachine:
         self._initial_st = initial_state
         self._final_st = final_state
         self._err_st = default_error_state
-        self._msg_queue = msg_queue
+        self._msg_queue = msg_queue or Queue()
         self._log_fn = log_fn
         self._transition_fn = transition_fn
         self._on_err_fn = on_error_fn
@@ -346,14 +364,15 @@ class StateMachine:
         self.reset()
 
     def start_failsafe_timer(self, duration):
-        def _wrap_timeout():
+        def _wrap_timeout(state, timeout):
             exception = StateTimedOut(
-                "State {} Timed out"
-                .format(self._current.name)
+                "State {} timed out after {} seconds"
+                .format(state, timeout)
             )
             self._msg_queue.put(exception)
 
-        return Timer(duration, lambda: _wrap_timeout())
+        return Timer(duration, lambda x, y: _wrap_timeout(x, y),
+                     args=[self._current.name, duration])
 
     def _transition(self, trans_state):
         # If the next state is a Push, save the push states on the
@@ -444,6 +463,10 @@ class StateMachine:
     def clear_state_stack(self):
         self._state_stack = []
 
+    def cleanup(self):
+        if self._current:
+            self._current._cancel_failsafe()
+
     @property
     def is_finished(self):
         return self._is_finished
@@ -485,13 +508,6 @@ class StateMachine:
                         self._final_st(self._shared_state)
                     # TODO: Should we continue to execute
 
-                elif next_state and state_name(next_state) != self._current.name:
-                    # We handled the message, remove it from the
-                    # current state and set our current state to the
-                    # next state
-                    self._transition(next_state)
-                    self._shared_state.msg = None
-
                 elif next_state in [None, True]:
                     # If we didn't return anything at all, or we
                     # returned that we swallowed the message, we'll
@@ -508,6 +524,13 @@ class StateMachine:
 
                     if should_trap:
                         self._trap_fn(self._shared_state)
+
+                elif next_state:
+                    # If we returned any state clear the message
+                    self._shared_state.msg = None
+                    if state_name(next_state) != self._current.name:
+                        # Set our current state to the next state
+                        self._transition(next_state)
 
             except (StateRetryLimitError, StateTimedOut) as e:
                 print("Got an error:", str(e))
