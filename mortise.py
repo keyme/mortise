@@ -205,11 +205,9 @@ class State:
         result = None
 
         if isinstance(shared_state.msg, StateTimedOut):
-            print("Handling timeout in q: {}".format(shared_state.msg))
             result = self._handle_timeout(shared_state)
             return result
         elif isinstance(shared_state.msg, StateRetryLimitError):
-            print("Handling retry limit error in q: {}".format(shared_state.msg))
             result = self.on_fail(shared_state)
             if not result:
                 result = shared_state.fsm._err_st
@@ -335,6 +333,7 @@ class StateMachine:
         self._final_st = final_state
         self._err_st = default_error_state
         self._msg_queue = msg_queue or Queue()
+        self._timeout_queue = Queue()
         self._log_fn = log_fn
         self._transition_fn = transition_fn
         self._on_err_fn = on_error_fn
@@ -369,7 +368,9 @@ class StateMachine:
                 "State {} timed out after {} seconds"
                 .format(state, timeout)
             )
-            self._msg_queue.put(exception)
+            self._timeout_queue.put(exception)
+            # No-op to make sure tick state machine
+            self._msg_queue.put(None)
 
         return Timer(duration, lambda x, y: _wrap_timeout(x, y),
                      args=[self._current.name, duration])
@@ -495,10 +496,14 @@ class StateMachine:
         fsm_busy = True
         while fsm_busy:
             try:
+                if not self._timeout_queue.empty():
+                    raise self._timeout_queue.get()
+
                 if filter_exception:
                     raise filter_exception
 
                 next_state = self._current.tick(self._shared_state)
+
                 if next_state == self._final_st:
                     # Mark ourselves complete
                     self._is_finished = True
@@ -529,11 +534,16 @@ class StateMachine:
                     # If we returned any state clear the message
                     self._shared_state.msg = None
                     if state_name(next_state) != self._current.name:
+                        # Make sure timeouts are contained to their own state
+                        if not self._timeout_queue.empty():
+                            self._log_fn("Timed out while executing state. "
+                                         "Moving on anyway.")
+                            # drop timeout on the floor
+                            e = self._timeout_queue.get()
+                            self._log_fn(str(e))
                         # Set our current state to the next state
                         self._transition(next_state)
-
             except (StateRetryLimitError, StateTimedOut) as e:
-                print("Got an error:", str(e))
                 self._msg_queue.put(e)
                 break
             except Exception as e:
