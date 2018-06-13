@@ -507,11 +507,7 @@ class StateMachine:
                 if next_state == self._final_st:
                     # Mark ourselves complete
                     self._is_finished = True
-
-                    # Execute the final state:
-                    if self._final_st:
-                        self._final_st(self._shared_state)
-                    # TODO: Should we continue to execute
+                    self._transition(next_state)
 
                 elif next_state in [None, True]:
                     # If we didn't return anything at all, or we
@@ -519,6 +515,10 @@ class StateMachine:
                     # assume that the FSM is no longer busy and is
                     # waiting on some external message to move the
                     # state along
+
+                    if self.is_finished:
+                        raise StateMachineComplete()
+
                     fsm_busy = False
 
                     # Additionally, if there is a message, and we
