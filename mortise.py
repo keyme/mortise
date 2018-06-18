@@ -316,7 +316,7 @@ class StateMachine:
                  msg_queue=None,
                  filter_fn=None, trap_fn=None,
                  on_error_fn=None,
-                 log_fn=None,
+                 log_fn=print,
                  transition_fn=None,
                  common_state=None):
 
