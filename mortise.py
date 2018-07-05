@@ -543,6 +543,7 @@ class StateMachine:
                             self._log_fn(str(e))
                         # Set our current state to the next state
                         self._transition(next_state)
+                fsm_busy = fsm_busy and self._msg_queue.empty()
             except (StateRetryLimitError, StateTimedOut) as e:
                 self._msg_queue.put(e)
                 break
