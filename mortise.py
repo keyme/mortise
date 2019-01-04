@@ -212,7 +212,6 @@ class State:
             if not result:
                 result = shared_state.fsm._err_st
             return result
-
         else:
             if not self.has_entered:
                 self.on_enter_handler(shared_state)
@@ -344,10 +343,7 @@ class StateMachine:
         self._current = None
         self._finished = False
 
-        # We store transitions and times separately since we don't
-        # want slightly different times to affect the set of actual transitions
-        self._transitions = set()
-        self._transition_times = {}
+        self.reset_transitions()
 
         self._last_trans_time = datetime.now()
 
@@ -374,6 +370,12 @@ class StateMachine:
 
         return Timer(duration, lambda x, y: _wrap_timeout(x, y),
                      args=[self._current.name, duration])
+
+    def reset_transitions(self):
+        # We store transitions and times separately since we don't
+        # want slightly different times to affect the set of actual transitions
+        self._transitions = set()
+        self._transition_times = {}
 
     def _transition(self, trans_state):
         # If the next state is a Push, save the push states on the
