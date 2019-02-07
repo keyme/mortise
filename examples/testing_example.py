@@ -4,13 +4,19 @@ import mortise.testing as testing_mortise
 # Can be run with any testing framework that uses unittest
 
 
+class CommonState:
+    def __init__(self):
+        self.entered = False
+
+
 class FirstState(mortise.State):
     def on_state(self, st):
         return NextState
 
 
-class NextState: pass
-
+class NextState(mortise.State):
+    def on_enter(self, st):
+        st.common.entered = True
 
 class FirstState2(mortise.State):
     def on_state(self, st):
@@ -138,3 +144,10 @@ class TestMortise(testing_mortise.MortiseTest):
 
     def testOnEnter(self):
         self.assertNextState(OnEnterState, NextState)
+
+    def testNextOnEnter(self):
+        common_state = CommonState()
+        self.assertFalse(common_state.entered)
+        self.assertNextState(OnEnterState, NextState, common_state,
+                             enter_next_state=True)
+        self.assertTrue(common_state.entered)

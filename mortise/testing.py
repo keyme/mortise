@@ -37,12 +37,16 @@ class MortiseTest(unittest.TestCase):
         return result_state
 
     def assertNextState(self, mortise_state, next_state,
-                        initial_state=None, msg=None):
+                        initial_state=None, msg=None,
+                        enter_next_state=False):
         current_state = mortise_state()
         fake_fsm = FakeFSM(initial_state or {})
         fake_fsm.msg = msg
         result_state = self._next_state(fake_fsm, current_state)
         self.assertIs(result_state, next_state)
+        if enter_next_state:
+            _next_state = next_state()
+            _next_state.on_enter_handler(fake_fsm)
 
     def assertTimedOutState(self, mortise_state, next_state,
                             initial_state=None):
