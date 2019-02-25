@@ -64,8 +64,9 @@ class MortiseTest(unittest.TestCase):
         return current_state.tick(fake_fsm)
 
     def assertNoTransition(self, mortise_state, initial_state=None, msg=None):
-        self.assertIsNone(
-            self._single_transition(mortise_state, initial_state, msg))
+        self.assertIn(
+            self._single_transition(mortise_state, initial_state, msg),
+            mortise.BLOCKING_RETURNS)
 
     def assertSomeTransition(self, mortise_state, initial_state=None,
                              msg=None):

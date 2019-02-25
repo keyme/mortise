@@ -2,11 +2,13 @@
 """ mortise is a finite state machine library.
 """
 
-from pprint import pprint
 from threading import Timer
 import collections
 from datetime import datetime
 from queue import Queue
+
+
+BLOCKING_RETURNS = [None, True]
 
 
 class StateRetryLimitError(Exception):
@@ -219,8 +221,8 @@ class State:
             result = self.on_state_handler(shared_state)
 
             # Early exit, this is a wait condition
-            if not result:
-                return
+            if result in BLOCKING_RETURNS:
+                return result
 
             # If a State intentionally returns itself, this is a retry and
             # we should re-enter on the next tick
@@ -259,6 +261,7 @@ class DefaultStates:
     class End(State):
         def on_state(self, evt):
             pass
+
 
 class GenericCommon:
     """This is an empty container class to hold any carry-over state in
@@ -511,7 +514,7 @@ class StateMachine:
                     self._is_finished = True
                     self._transition(next_state)
 
-                elif next_state in [None, True]:
+                elif next_state in BLOCKING_RETURNS:
                     # If we didn't return anything at all, or we
                     # returned that we swallowed the message, we'll
                     # assume that the FSM is no longer busy and is

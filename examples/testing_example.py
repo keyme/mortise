@@ -18,6 +18,7 @@ class NextState(mortise.State):
     def on_enter(self, st):
         st.common.entered = True
 
+
 class FirstState2(mortise.State):
     def on_state(self, st):
         if st.common.cool:
@@ -97,6 +98,11 @@ class NoneState(mortise.State):
         return None
 
 
+class TrueState(mortise.State):
+    def on_state(self, st):
+        return True
+
+
 class OnEnterState(mortise.State):
     def on_enter(self, st):
         self.entered = True
@@ -141,6 +147,9 @@ class TestMortise(testing_mortise.MortiseTest):
 
     def testNoTransition(self):
         self.assertNoTransition(NoneState)
+
+    def testTrueNoTransition(self):
+        self.assertNoTransition(TrueState)
 
     def testOnEnter(self):
         self.assertNextState(OnEnterState, NextState)
