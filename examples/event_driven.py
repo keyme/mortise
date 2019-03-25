@@ -9,6 +9,8 @@ from mortise import State
 
 
 class Ping(State):
+    TIMEOUT = 10
+
     def on_state(self, st):
         if st.msg:
             print("Ping: ", st.msg['data'])
@@ -37,7 +39,8 @@ def loop(msg_queue):
         final_state=mortise.DefaultStates.End,
         default_error_state=ErrorState,
         msg_queue=msg_queue,
-        log_fn=print)
+        log_fn=print,
+        dwell_states=[Pong])
 
     # Initial kick of the state machine for setup
     fsm.tick()

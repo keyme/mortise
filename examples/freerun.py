@@ -1,16 +1,21 @@
 #!/usr/bin/env python3
-import queue
-
 import mortise
 from mortise import State
 
+
 class Ping(State):
+    RETRIES = 3
+
     def on_enter(self, st):
         print("Entering Ping")
 
     def on_state(self, st):
         print("Ping")
+        return self
+
+    def on_fail(self, st):
         return Pong
+
 
 class Pong(State):
     def on_state(self, st):
@@ -19,6 +24,7 @@ class Pong(State):
 
     def on_leave(self, st):
         print("Leaving Pong")
+
 
 class ErrorState(State):
     def on_state(self, st):
@@ -33,6 +39,6 @@ def main():
         log_fn=print)
 
     # Runs forever
-    fsm.tick()
+    fsm.start_non_blocking()
 
 main()

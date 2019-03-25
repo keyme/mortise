@@ -17,6 +17,8 @@ class Foo(State):
     """ Foo state keeps count of all "foo" messages it sees and prints out
         the current count. When it sees a "bar" message transitions to Bar
         state. All other messages are ignored and trapped."""
+    TIMEOUT = 10
+
     def on_enter(self, st):
         # Re-initializes Foo count
         self.count = 0
@@ -47,6 +49,8 @@ class Bar(State):
     """ Bar state keeps count of all "bar" messages it sees and prints out
         the current count. When it sees a "foo" message transitions to Foo
         state. All other messages are ignored and trapped."""
+    TIMEOUT = 10
+
     def on_state(self, st):
         if st.msg:
             print("Pong: ", st.msg['data'])

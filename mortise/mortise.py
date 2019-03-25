@@ -39,6 +39,17 @@ class NoPushedStatesError(Exception):
     pass
 
 
+class NonBlockingStalled(Exception):
+    pass
+
+
+class BlockedInUntimedState(Exception):
+    def __init__(self, state):
+        super().__init__("Blocking on state without a timer: {}"
+                         .format(state_name(state)))
+        self.state = state
+
+
 class Push(object):
     def __init__(self, *args):
         self.push_states = args
@@ -305,6 +316,10 @@ class StateMachine:
     trap will capture any unhandled message and can be used to raise
     exceptions or log notification messages.
 
+    The state machine will raise an error if it stops in a state that has
+    neither a timeout nor is the final state unless it is included in an
+    iterable called dwell_states.
+
     (For a visual overview of the data flow, see mortise_data_flow.png)
 
     Finally, the user MAY supply a common_state class instance. This
@@ -320,7 +335,8 @@ class StateMachine:
                  on_error_fn=None,
                  log_fn=print,
                  transition_fn=None,
-                 common_state=None):
+                 common_state=None,
+                 dwell_states=None):
 
         # We want to make sure that initial/final/default_err states
         # are descriptors, not instances
@@ -358,6 +374,7 @@ class StateMachine:
         self._trap_fn = trap_fn
 
         self._shared_state = SharedState(self, common_state)
+        self._dwell_states = dwell_states or []
 
         self.reset()
 
@@ -477,6 +494,21 @@ class StateMachine:
     def is_finished(self):
         return self._is_finished
 
+    def start_non_blocking(self):
+        self._msg_queue.put(None)
+        # Still need while loop for getting errors pushed into queue
+        while True:
+            try:
+                # Still check messages for RetryLimitException
+                msg = self._msg_queue.get()
+                self.tick(msg)
+            except StateMachineComplete:
+                raise
+            if self._msg_queue.empty():
+                raise NonBlockingStalled(
+                    "Non-blocking state machine stalled in {}"
+                    .format(state_name(self._current)))
+
     def tick(self, message=None):
         self._shared_state.msg = message
 
@@ -495,12 +527,12 @@ class StateMachine:
             #  to raise them later in the try to pass to the on_error function
             filter_exception = e
 
-        if self.is_finished:
-            raise StateMachineComplete()
-
         fsm_busy = True
         while fsm_busy:
             try:
+                if isinstance(self._current, self._final_st):
+                    self._is_finished = True
+
                 if not self._timeout_queue.empty():
                     raise self._timeout_queue.get()
 
@@ -509,12 +541,7 @@ class StateMachine:
 
                 next_state = self._current.tick(self._shared_state)
 
-                if next_state == self._final_st:
-                    # Mark ourselves complete
-                    self._is_finished = True
-                    self._transition(next_state)
-
-                elif next_state in BLOCKING_RETURNS:
+                if next_state in BLOCKING_RETURNS:
                     # If we didn't return anything at all, or we
                     # returned that we swallowed the message, we'll
                     # assume that the FSM is no longer busy and is
@@ -548,6 +575,7 @@ class StateMachine:
                             self._log_fn(str(e))
                         # Set our current state to the next state
                         self._transition(next_state)
+
                 fsm_busy = fsm_busy and self._msg_queue.empty()
             except (StateRetryLimitError, StateTimedOut) as e:
                 self._msg_queue.put(e)
@@ -565,3 +593,15 @@ class StateMachine:
                     self._transition(next_state)
                 else:
                     raise e
+
+        if self.is_finished:
+            raise StateMachineComplete()
+
+        # If the state machine hasn't finished and the current state doesn't
+        # have a timeout or isn't in one of the dwell_states passed in when
+        # creating the state machine at the end of a tick an exception is
+        # raised to indicate that the state machine is stalled.
+        if (self._msg_queue.empty() and self._current.TIMEOUT is None
+                and not any([isinstance(self._current, d_state)
+                             for d_state in self._dwell_states])):
+            raise BlockedInUntimedState(self._current)
