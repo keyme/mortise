@@ -548,9 +548,6 @@ class StateMachine:
                     # waiting on some external message to move the
                     # state along
 
-                    if self.is_finished:
-                        raise StateMachineComplete()
-
                     fsm_busy = False
 
                     # Additionally, if there is a message, and we
