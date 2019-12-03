@@ -394,8 +394,9 @@ class StateMachine:
     def reset_transitions(self):
         # We store transitions and times separately since we don't
         # want slightly different times to affect the set of actual transitions
+        self._transition_id = 0
         self._transitions = set()
-        self._transition_times = {}
+        self._transition_times = collections.defaultdict(list)
 
     def _transition(self, trans_state):
         # If the next state is a Push, save the push states on the
@@ -437,7 +438,9 @@ class StateMachine:
         trans_tup = (cur_base, cur_name, next_base, next_name)
 
         self._transitions.add(trans_tup)
-        self._transition_times[trans_tup] = trans_delta
+        self._transition_times[trans_tup].append((self._transition_id,
+                                                  trans_delta))
+        self._transition_id += 1
 
         if self._log_fn:
             self._log_fn(
@@ -464,8 +467,12 @@ class StateMachine:
             clusters[first_base].add(first)
             clusters[second_base].add(second)
             cluster_transitions.add("{}->{}".format(first_base, second_base))
-            trans_delta = self._transition_times[trans_tup]
-            transitions += "{}->{} [ label=\"{}\" ];\n".format(first, second, trans_delta)
+            trans_deltas = self._transition_times[trans_tup]
+            trans_deltas_strs = ["{}: {:.2}".format(t_id, time)
+                                 for t_id, time in trans_deltas]
+            transitions += ("{}->{} [ label=\"{}\" ];\n"
+                            .format(first, second,
+                                    "\n".join(trans_deltas_strs)))
 
         for cname, cluster in clusters.items():
             result += "\tsubgraph cluster_{} {{\n".format(cname)
